@@ -30,7 +30,9 @@ bool IsVxeR1(USHORT vid, USHORT pid) {
 
 bool IsCable(USHORT vid, USHORT pid) {
     bool hecate_cable = vid == 0x35BB && (pid == 0xD3FA || pid == 0xD3FC || pid == 0xD3FD);
-    return (vid == 0x33E4 && GWolvesIsCable(pid)) || hecate_cable ||
+    // VGN DragonFly F2 Ultra+: the receiver is 3554:FB49, the mouse on its USB cable is 3554:FB3D.
+    bool vgn_cable = vid == 0x3554 && pid == 0xFB3D;
+    return (vid == 0x33E4 && GWolvesIsCable(pid)) || hecate_cable || vgn_cable ||
            (vid == 0x3554 && (pid == 0xF55E || pid == 0xF58C || pid == 0xF58F || pid == 0xF506));
 }
 
@@ -124,8 +126,17 @@ void PollKysona(PollContext& ctx) {
                 for (auto& n : seenNames) dup |= n == s.name;
                 if (dup) {
                     ctx.Claim(vid, pid);
-                    for (auto& o : ctx.out)
-                        if (o.name == s.name && s.charging) o.charging = true;
+                    for (auto& o : ctx.out) {
+                        if (o.name != s.name) continue;
+                        if (s.charging) o.charging = true;
+                        // The live reading (a cable usually reports while charging) beats the other
+                        // interface's last known one, so the merged entry does not show a stale level.
+                        if (s.percent >= 0 && (o.percent < 0 || o.asleep || (s.charging && !o.charging))) {
+                            o.percent = s.percent;
+                            o.asleep = s.asleep;
+                            o.millivolts = s.millivolts;
+                        }
+                    }
                 } else {
                     seenNames.push_back(s.name);
                     ctx.Add(s, vid, pid);

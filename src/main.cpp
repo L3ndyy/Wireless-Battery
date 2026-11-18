@@ -499,6 +499,16 @@ void OnResults(std::vector<DeviceStatus>& results) {
         // Some receivers drop sleeping devices from the link; keep showing the last value for a while.
         bool inGrace = !seen.count(it->first) && e.st.graceSec > 0 && e.st.connected &&
                        GetTickCount64() - e.lastSeen < (ULONGLONG)e.st.graceSec * 1000;
+        // A mouse that switches between its dongle and its USB cable comes back under a new key.
+        // If the same device is live again under another key, drop the stale copy right away
+        // instead of listing the mouse twice for the whole grace period.
+        if (inGrace) {
+            for (auto& s : results)
+                if (s.key != it->first && s.kind == e.st.kind && !s.name.empty() && s.name == e.st.name) {
+                    inGrace = false;
+                    break;
+                }
+        }
         if (inGrace) {
             e.st.percent = -1;
             e.st.asleep = true;
