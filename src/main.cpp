@@ -6,6 +6,7 @@
 #include <hidclass.h>
 
 #include <algorithm>
+#include <atomic>
 #include <climits>
 #include <cstdio>
 #include <map>
@@ -17,7 +18,9 @@
 #include "i18n.h"
 #include "labels.h"
 #include "report.h"
+#include "ui.h"
 #include "update.h"
+#include "version.h"
 #include "widget.h"
 
 namespace {
@@ -27,13 +30,13 @@ constexpr UINT WM_RESULTS = WM_APP + 2;
 constexpr UINT WM_WIDGET_CLICK = WM_APP + 3;
 constexpr UINT_PTR TIMER_DEBOUNCE = 1;
 constexpr UINT_PTR TIMER_WIDGET = 2;
-constexpr DWORD POLL_INTERVAL_MS = 60 * 1000;
+constexpr int DEFAULT_POLL_SECONDS = 60;
 constexpr int LOW_BATTERY = 15;
 constexpr UINT PLACEHOLDER_ID = 1;
 
 enum MenuId : UINT {
     ID_REFRESH = 100, ID_AUTOSTART, ID_HIDE_LAST_KNOWN, ID_WIDGET_BACKGROUND, ID_EXIT, ID_MODE_WIDGET, ID_MODE_TRAY, ID_SUPPORT, ID_REPORT,
-    ID_BRAND_COLORS, ID_STACKED, ID_UPDATE, ID_ONLY_FAVORITES,
+    ID_BRAND_COLORS, ID_STACKED, ID_UPDATE, ID_ONLY_FAVORITES, ID_SETTINGS, ID_DEVICES,
     ID_LANG_AUTO = 400, ID_LANG_ADD, ID_LANG_FIRST,  // "Language": ID_LANG_FIRST + 0..63
     ID_MONITOR_ALL = 300, ID_MONITOR_MAIN, ID_MONITOR_FIRST,  // "Show the widget on": ID_MONITOR_FIRST + 0..31
     ID_DEVICE_FIRST = 1000
@@ -57,7 +60,10 @@ bool g_hideLastKnown = false;  // hide (last known) / asleep devices from taskba
 std::wstring g_widgetMonitor = L"all";  // which taskbars show the widget: "all", "main" or one monitor id
 bool g_widgetBackground = false;  // draw a plate behind the taskbar text (transparent taskbar themes)
 bool g_stacked = false;      // icon above the percentage (menu option)
-bool g_brandColors = false;  // off by default; known brands get their color (Razer green, Logitech blue, ...)
+int  g_accentMode = 0;       // 0 no accent, 1 brand colors, 2 one custom color
+COLORREF g_accentColor = RGB(30, 190, 90);
+int  g_themeMode = 0;        // 0 follow Windows, 1 light, 2 dark
+std::atomic<int> g_pollSeconds{ DEFAULT_POLL_SECONDS };
 
 struct TrayEntry {
     UINT uid = 0;
@@ -242,8 +248,47 @@ void SetWidgetMonitor(const std::wstring& v) {
 }
 bool LoadStacked() { return LoadBoolSetting(L"StackedLayout", false); }
 void SaveStacked(bool on) { SaveBoolSetting(L"StackedLayout", on); }
-bool LoadBrandColors() { return LoadBoolSetting(L"BrandColors", false); }
-void SaveBrandColors(bool on) { SaveBoolSetting(L"BrandColors", on); }
+
+int LoadIntSetting(const wchar_t* name, int defaultVal) {
+    DWORD v = (DWORD)defaultVal, sz = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, name, RRF_RT_REG_DWORD, nullptr, &v, &sz) != ERROR_SUCCESS) return defaultVal;
+    return (int)v;
+}
+void SaveIntSetting(const wchar_t* name, int value) {
+    DWORD v = (DWORD)value;
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, name, REG_DWORD, &v, sizeof(v));
+}
+void SaveBrandColors(bool on) { SaveBoolSetting(L"BrandColors", on); }  // older builds read this one
+
+int LoadThemeMode() {
+    int v = LoadIntSetting(L"ThemeMode", 0);
+    return v < 0 || v > 2 ? 0 : v;
+}
+void SaveThemeMode(int v) { SaveIntSetting(L"ThemeMode", v); }
+
+// Older builds only had the "Brand colors" checkbox; keep that choice when AccentMode is absent.
+int LoadAccentMode() {
+    DWORD v = 0, sz = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"AccentMode", RRF_RT_REG_DWORD, nullptr, &v, &sz) == ERROR_SUCCESS)
+        return v > 2 ? 0 : (int)v;
+    return LoadBoolSetting(L"BrandColors", false) ? 1 : 0;
+}
+void SaveAccentMode(int v) {
+    SaveIntSetting(L"AccentMode", v);
+    SaveBrandColors(v == 1);  // keep the old value readable by older builds
+}
+
+COLORREF LoadAccentColor() {
+    int v = LoadIntSetting(L"AccentColor", (int)RGB(30, 190, 90));
+    return (COLORREF)v;
+}
+void SaveAccentColor(COLORREF c) { SaveIntSetting(L"AccentColor", (int)c); }
+
+int LoadPollSeconds() {
+    int v = LoadIntSetting(L"PollSeconds", DEFAULT_POLL_SECONDS);
+    return v < 1 ? 1 : (v > 3600 ? 3600 : v);
+}
+void SavePollSeconds(int v) { SaveIntSetting(L"PollSeconds", v); }
 
 bool AutostartEnabled() {
     wchar_t buf[MAX_PATH * 2];
@@ -364,15 +409,28 @@ HICON RenderIcon(const std::wstring& text, int barPct, Rgb textColor, Rgb barCol
 
 Rgb Foreground() { return g_lightTaskbar ? Rgb{ 0, 0, 0 } : Rgb{ 255, 255, 255 }; }
 
-Accent AccentFor(const DeviceStatus& s) { return g_brandColors ? BrandOf(s) : Accent::None; }
+// What colors one device's icon: nothing, its brand, or the single color chosen in the settings.
+struct AccentPick {
+    Accent accent = Accent::None;
+    bool custom = false;
+    BrandColor color{};
+};
 
-HICON IconFor(int pct, bool charging, bool dim, Accent accent) {
+AccentPick AccentFor(const DeviceStatus& s) {
+    if (g_accentMode == 2)
+        return { Accent::None, true, { GetRValue(g_accentColor), GetGValue(g_accentColor), GetBValue(g_accentColor) } };
+    if (g_accentMode == 1) return { BrandOf(s), false, {} };
+    return {};
+}
+
+HICON IconFor(int pct, bool charging, bool dim, const AccentPick& pick) {
     Rgb fg = Foreground();
-    BrandColor bc = AccentColor(accent, g_lightTaskbar);
+    BrandColor bc = pick.custom ? pick.color : AccentColor(pick.accent, g_lightTaskbar);
+    bool branded = pick.custom || pick.accent != Accent::None;
     Rgb bar = charging        ? Rgb{ 0, 170, 255 }
             : pct <= LOW_BATTERY ? Rgb{ 232, 32, 48 }
             : pct <= 30       ? Rgb{ 255, 150, 0 }
-            : accent != Accent::None ? Rgb{ bc.r, bc.g, bc.b }
+            : branded         ? Rgb{ bc.r, bc.g, bc.b }
                               : Rgb{ 30, 190, 90 };
     Rgb text = (!charging && pct >= 0 && pct <= LOW_BATTERY) ? Rgb{ 240, 50, 60 } : fg;
     std::wstring t = pct < 0 ? L"?" : std::to_wstring(pct);
@@ -455,9 +513,12 @@ void ApplyEntry(TrayEntry& e) {
     }
     int shown = s.percent >= 0 ? s.percent : e.lastPct;
     bool dim = s.percent < 0;
-    Accent accent = AccentFor(s);
+    AccentPick accent = AccentFor(s);
     std::wstring sig = std::to_wstring(shown) + (s.charging ? L"c" : L"") + (dim ? L"d" : L"") + (g_lightTaskbar ? L"l" : L"k") +
-                       L"a" + std::to_wstring((int)accent);
+                       L"a" + std::to_wstring((int)accent.accent) +
+                       (accent.custom ? L"u" + std::to_wstring((int)GetRValue(g_accentColor) * 65536 + (int)GetGValue(g_accentColor) * 256 +
+                                                               (int)GetBValue(g_accentColor))
+                                      : L"");
     if (sig != e.iconSig || !e.icon) {
         if (e.icon) DestroyIcon(e.icon);
         e.icon = IconFor(shown, s.charging, dim, accent);
@@ -490,6 +551,8 @@ int KindOrder(DeviceKind k) {  // default order: headset first, then mouse, ...
 }
 
 bool IsShown(const TrayEntry& e) { return e.st.connected && !IsEntryHidden(e); }
+
+void RefreshDevicesWindow();  // defined with the settings block below
 
 // Entries in left-to-right order: the user's order first, then the rest by type and name. Works the
 // same for every kind of device (receivers, Bluetooth, controllers, HeadsetControl) as it only uses
@@ -532,7 +595,10 @@ void UpdateWidget() {
         it.low = !it.charging && it.percent >= 0 && it.percent <= LOW_BATTERY;
         it.bluetooth = e->st.via == L"Bluetooth";
         it.label = labels[items.size()];
-        it.accent = AccentFor(e->st);
+        AccentPick accent = AccentFor(e->st);
+        it.accent = accent.accent;
+        it.custom = accent.custom;
+        it.customColor = accent.color;
         items.push_back(it);
         if (!tip.empty()) tip += L"\n";
         tip += DisplayName(e->st) + L": " + StatusText(*e);
@@ -582,6 +648,7 @@ void OnResults(std::vector<DeviceStatus>& results) {
     }
     UpdatePlaceholder();
     UpdateWidget();
+    RefreshDevicesWindow();
 }
 
 // Makes the actual display match the chosen mode; falls back to tray icons if the taskbar
@@ -629,6 +696,8 @@ void ReAddAll() {
 
 // Switches the UI language ("" = follow Windows) and redraws everything that shows text.
 void SetLanguage(const std::wstring& code);
+// Redraws the "All devices" window if it is open (defined with the settings block below).
+void RefreshDevicesWindow();
 
 void RedrawAll() {
     if (g_placeholderIcon) {
@@ -650,13 +719,6 @@ void SetStacked(bool on) {
     g_stacked = on;
     SaveStacked(on);
     widget::SetStacked(on);
-}
-
-void SetBrandColors(bool on) {
-    g_brandColors = on;
-    SaveBrandColors(on);
-    RedrawAll();
-    UpdateWidget();
 }
 
 void ToggleHidden(const std::wstring& key) {
@@ -813,9 +875,146 @@ void MoveEntry(const std::wstring& key, int dir) {
 
 void StartUpdateCheck(bool manual);
 
+// ---- settings and windows ---------------------------------------------------------------------
+
+// The chosen theme; automatic follows the taskbar's own light/dark setting.
+void ApplyEffectiveTheme() {
+    bool light = g_themeMode == 1 ? true : g_themeMode == 2 ? false : ReadLightTaskbar();
+    if (light != g_lightTaskbar) {
+        g_lightTaskbar = light;
+        ApplyMenuTheme(light);
+        RedrawAll();
+        widget::SetLightTheme(light);
+    }
+    ui::SetDarkTheme(!light);
+}
+
+std::vector<ui::DeviceCard> BuildCards() {
+    std::vector<ui::DeviceCard> out;
+    for (TrayEntry* e : OrderedEntries(false)) {
+        const DeviceStatus& s = e->st;
+        ui::DeviceCard c;
+        c.key = s.key;
+        c.name = DisplayName(s);
+        c.source = T(s.via);
+        c.kind = s.kind;
+        c.percent = s.percent >= 0 ? s.percent : e->lastPct;
+        c.charging = s.charging;
+        c.low = !s.charging && s.percent >= 0 && s.percent <= LOW_BATTERY;
+        c.asleep = s.asleep || (s.percent < 0 && e->lastPct >= 0);
+        c.connected = s.connected;
+        c.hidden = IsEntryHidden(*e);
+        c.favorite = IsFavorite(s.key);
+        c.bluetooth = s.via == L"Bluetooth";
+        AccentPick accent = AccentFor(s);
+        c.accent = accent.accent;
+        c.custom = accent.custom;
+        c.customColor = accent.color;
+        c.millivolts = s.millivolts;
+        out.push_back(c);
+    }
+    return out;
+}
+
+void RefreshDevicesWindow() {
+    if (ui::DevicesOpen()) ui::UpdateDevices(BuildCards());
+}
+
+ui::DevicesActions DeviceActions() {
+    ui::DevicesActions a;
+    a.reorder = [](const std::vector<std::wstring>& keys) {
+        std::vector<std::wstring> order = keys;
+        for (const auto& k : g_order)  // keep the places of devices that are not in the window right now
+            if (std::find(order.begin(), order.end(), k) == order.end()) order.push_back(k);
+        g_order = order;
+        SaveOrder();
+        UpdateWidget();
+    };
+    a.toggleFavorite = [](const std::wstring& key) {
+        ToggleFavorite(key);
+        RefreshDevicesWindow();
+    };
+    a.toggleHidden = [](const std::wstring& key) {
+        ToggleHidden(key);
+        RefreshDevicesWindow();
+    };
+    a.rename = [](const std::wstring& key) {
+        auto it = g_entries.find(key);
+        if (it == g_entries.end()) return;
+        std::wstring name = AskDeviceName(DisplayName(it->second.st), it->second.st.name);
+        SetDeviceName(key, it->second.st.name, name);
+        RefreshDevicesWindow();
+    };
+    return a;
+}
+
+ui::SettingsState CurrentSettings() {
+    ui::SettingsState s;
+    s.widget = g_wantWidget;
+    s.background = g_widgetBackground;
+    s.stacked = g_stacked;
+    s.hideLastKnown = g_hideLastKnown;
+    s.onlyFavorites = g_onlyFavorites;
+    s.autostart = AutostartEnabled();
+    s.theme = g_themeMode;
+    s.accent = g_accentMode;
+    s.accentColor = g_accentColor;
+    s.pollSeconds = g_pollSeconds.load();
+    s.language = i18n::Choice();
+    s.monitor = g_widgetMonitor;
+    s.version = WB_VERSION;
+    return s;
+}
+
+void ApplySettings(const ui::SettingsState& s) {
+    if (s.widget != g_wantWidget) SetMode(s.widget);
+    if (s.background != g_widgetBackground) SetWidgetBackground(s.background);
+    if (s.stacked != g_stacked) SetStacked(s.stacked);
+    if (s.hideLastKnown != g_hideLastKnown) SetHideLastKnown(s.hideLastKnown);
+    if (s.onlyFavorites != g_onlyFavorites) SetOnlyFavorites(s.onlyFavorites);
+    if (s.autostart != AutostartEnabled()) SetAutostart(s.autostart);
+    if (s.theme != g_themeMode) {
+        g_themeMode = s.theme;
+        SaveThemeMode(s.theme);
+        ApplyEffectiveTheme();
+    }
+    if (s.accent != g_accentMode || s.accentColor != g_accentColor) {
+        g_accentMode = s.accent;
+        g_accentColor = s.accentColor;
+        SaveAccentMode(s.accent);
+        SaveAccentColor(s.accentColor);
+        RedrawAll();
+        UpdateWidget();
+    }
+    bool languageChanged = s.language.empty() ? !i18n::Choice().empty() : _wcsicmp(s.language.c_str(), i18n::Choice().c_str()) != 0;
+    if (languageChanged) SetLanguage(s.language);
+    if (s.monitor != g_widgetMonitor) SetWidgetMonitor(s.monitor);
+    int poll = s.pollSeconds < 1 ? 1 : s.pollSeconds;
+    if (poll != g_pollSeconds.load()) {
+        g_pollSeconds = poll;
+        SavePollSeconds(poll);
+        SetEvent(g_refreshEvt);  // pick up the new interval now instead of after the old one
+    }
+    RefreshDevicesWindow();
+}
+
+void ShowAllDevices() { ui::ShowDevices(g_hwnd, BuildCards(), DeviceActions()); }
+
+void ShowSettingsWindow() {
+    ui::SettingsActions a;
+    a.apply = ApplySettings;
+    a.refresh = [] { SetEvent(g_refreshEvt); };
+    a.checkUpdates = [] { StartUpdateCheck(true); };
+    a.showDevices = ShowAllDevices;
+    ui::ShowSettings(g_hwnd, CurrentSettings(), a);
+}
+
 void ShowMenu() {
     ApplyMenuTheme(g_lightTaskbar);
     HMENU m = CreatePopupMenu();
+    AppendMenuW(m, MF_STRING, ID_DEVICES, T(L"All devices..."));
+    AppendMenuW(m, MF_STRING, ID_SETTINGS, T(L"Settings..."));
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     std::vector<std::wstring> keys;  // device index -> device key; menu id ID_DEVICE_FIRST + index * DEV_STRIDE + command
     std::vector<TrayEntry*> all = OrderedEntries(false), shown = OrderedEntries(true);
     if (all.empty()) AppendMenuW(m, MF_STRING | MF_GRAYED, 0, T(L"No devices with battery info found"));
@@ -839,58 +1038,8 @@ void ShowMenu() {
         AppendMenuW(m, MF_POPUP | (IsHidden(k) ? 0 : MF_CHECKED), (UINT_PTR)sub, line.c_str());
         keys.push_back(k);
     }
-    AppendMenuW(m, MF_STRING | (g_hideLastKnown ? MF_CHECKED : 0), ID_HIDE_LAST_KNOWN, T(L"Hide last known / asleep devices"));
-    AppendMenuW(m, MF_STRING | (g_onlyFavorites ? MF_CHECKED : 0), ID_ONLY_FAVORITES, T(L"Show only favorites"));
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(m, MF_STRING | (g_wantWidget ? MF_CHECKED : 0), ID_MODE_WIDGET, T(L"Show on the taskbar (icon + percentage)"));
-    AppendMenuW(m, MF_STRING | (!g_wantWidget ? MF_CHECKED : 0), ID_MODE_TRAY, T(L"Show as tray icons"));
-    CheckMenuRadioItem(m, ID_MODE_WIDGET, ID_MODE_TRAY, g_wantWidget ? ID_MODE_WIDGET : ID_MODE_TRAY, MF_BYCOMMAND);
-    UINT bgFlags = MF_STRING | (g_widgetBackground ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED);
-    AppendMenuW(m, bgFlags, ID_WIDGET_BACKGROUND, T(L"Background behind taskbar text (for transparent taskbars)"));
-    AppendMenuW(m, MF_STRING | (g_stacked ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED), ID_STACKED, T(L"Icons above percentages (narrower)"));
-    // With more than one monitor: choose which taskbars show the widget (all, main only, or one monitor).
-    auto monitors = widget::OtherMonitors();
-    if (monitors.size() > 31) monitors.resize(31);
-    if (!monitors.empty()) {
-        HMENU sub = CreatePopupMenu();
-        UINT f = MF_STRING | (g_wantWidget ? 0 : MF_GRAYED);
-        AppendMenuW(sub, f, ID_MONITOR_ALL, T(L"All monitors"));
-        AppendMenuW(sub, f, ID_MONITOR_MAIN, T(L"Main monitor only"));
-        UINT checked = g_widgetMonitor == L"main" ? ID_MONITOR_MAIN : ID_MONITOR_ALL;
-        bool found = g_widgetMonitor == L"all" || g_widgetMonitor == L"main";
-        for (UINT i = 0; i < monitors.size(); i++) {
-            AppendMenuW(sub, f, ID_MONITOR_FIRST + i, TF(L"{monitor} only", { { L"monitor", monitors[i].label } }).c_str());
-            if (monitors[i].id == g_widgetMonitor) { checked = ID_MONITOR_FIRST + i; found = true; }
-        }
-        if (!found) {  // the chosen monitor is unplugged: the main taskbar shows the widget meanwhile
-            AppendMenuW(sub, MF_STRING | MF_GRAYED, ID_MONITOR_FIRST + 31, T(L"Chosen monitor (not connected, shown on main)"));
-            checked = ID_MONITOR_FIRST + 31;
-        }
-        CheckMenuRadioItem(sub, ID_MONITOR_ALL, ID_MONITOR_FIRST + 31, checked, MF_BYCOMMAND);
-        AppendMenuW(m, MF_POPUP | (g_wantWidget ? 0 : MF_GRAYED), (UINT_PTR)sub, T(L"Show the widget on"));
-    }
-    AppendMenuW(m, MF_STRING | (g_brandColors ? MF_CHECKED : 0), ID_BRAND_COLORS, T(L"Brand colors (Razer green, Logitech blue, ...)"));
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    // Language: automatic, every built-in or user-added language (in its own name), and a way to add one.
-    i18n::Init();  // picks up language files added since the last time
-    auto languages = i18n::Available();
-    if (languages.size() > 64) languages.resize(64);
-    {
-        HMENU sub = CreatePopupMenu();
-        AppendMenuW(sub, MF_STRING, ID_LANG_AUTO, T(L"Automatic (Windows language)"));
-        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
-        UINT checked = ID_LANG_AUTO;
-        for (UINT i = 0; i < languages.size(); i++) {
-            AppendMenuW(sub, MF_STRING, ID_LANG_FIRST + i, languages[i].name.c_str());
-            if (!i18n::Choice().empty() && _wcsicmp(languages[i].code.c_str(), i18n::Choice().c_str()) == 0) checked = ID_LANG_FIRST + i;
-        }
-        CheckMenuRadioItem(sub, ID_LANG_AUTO, ID_LANG_FIRST + 63, checked, MF_BYCOMMAND);
-        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(sub, MF_STRING, ID_LANG_ADD, T(L"Add your own language..."));
-        AppendMenuW(m, MF_POPUP, (UINT_PTR)sub, T(L"Language"));
-    }
     AppendMenuW(m, MF_STRING, ID_REFRESH, T(L"Refresh now"));
-    AppendMenuW(m, MF_STRING | (AutostartEnabled() ? MF_CHECKED : 0), ID_AUTOSTART, T(L"Start with Windows"));
     AppendMenuW(m, MF_STRING, ID_REPORT, T(L"Request support for a device..."));
     AppendMenuW(m, MF_STRING, ID_SUPPORT, T(L"Support the project..."));
     AppendMenuW(m, MF_STRING, ID_UPDATE, T(L"Check for updates..."));
@@ -904,29 +1053,15 @@ void ShowMenu() {
     PostMessageW(g_hwnd, WM_NULL, 0, 0);
     DestroyMenu(m);
     switch (cmd) {
+        case ID_DEVICES: ShowAllDevices(); break;
+        case ID_SETTINGS: ShowSettingsWindow(); break;
         case ID_REFRESH: SetEvent(g_refreshEvt); break;
-        case ID_AUTOSTART: SetAutostart(!AutostartEnabled()); break;
-        case ID_HIDE_LAST_KNOWN: SetHideLastKnown(!g_hideLastKnown); break;
-        case ID_ONLY_FAVORITES: SetOnlyFavorites(!g_onlyFavorites); break;
-        case ID_WIDGET_BACKGROUND: SetWidgetBackground(!g_widgetBackground); break;
-        case ID_MONITOR_ALL: SetWidgetMonitor(L"all"); break;
-        case ID_LANG_AUTO: SetLanguage(L""); break;
-        case ID_LANG_ADD: i18n::OpenUserFolder(); break;
-        case ID_MONITOR_MAIN: SetWidgetMonitor(L"main"); break;
-        case ID_BRAND_COLORS: SetBrandColors(!g_brandColors); break;
-        case ID_STACKED: SetStacked(!g_stacked); break;
-        case ID_MODE_WIDGET: SetMode(true); break;
-        case ID_MODE_TRAY: SetMode(false); break;
         case ID_SUPPORT: ShellExecuteW(nullptr, L"open", L"https://github.com/sponsors/krisgfx9", nullptr, nullptr, SW_SHOWNORMAL); break;
         case ID_REPORT: report::Show(g_inst, g_hwnd); break;
         case ID_UPDATE: StartUpdateCheck(true); break;
         case ID_EXIT: DestroyWindow(g_hwnd); break;
         default:
-            if (cmd >= ID_LANG_FIRST && cmd < ID_LANG_FIRST + languages.size()) {
-                SetLanguage(languages[cmd - ID_LANG_FIRST].code);
-            } else if (cmd >= ID_MONITOR_FIRST && cmd < ID_MONITOR_FIRST + monitors.size()) {
-                SetWidgetMonitor(monitors[cmd - ID_MONITOR_FIRST].id);
-            } else if (cmd >= ID_DEVICE_FIRST && cmd < ID_DEVICE_FIRST + keys.size() * DEV_STRIDE) {
+            if (cmd >= ID_DEVICE_FIRST && cmd < ID_DEVICE_FIRST + keys.size() * DEV_STRIDE) {
                 std::wstring key = keys[(cmd - ID_DEVICE_FIRST) / DEV_STRIDE];
                 switch ((cmd - ID_DEVICE_FIRST) % DEV_STRIDE) {
                     case DEV_TOGGLE: ToggleHidden(key); break;
@@ -942,6 +1077,7 @@ void ShowMenu() {
                         break;
                     }
                 }
+                RefreshDevicesWindow();
             }
     }
 }
@@ -1014,7 +1150,7 @@ DWORD WINAPI Worker(LPVOID) {
     for (;;) {
         auto* v = new std::vector<DeviceStatus>(g_demo ? DemoDevices() : PollAllDevices());
         if (!PostMessageW(g_hwnd, WM_RESULTS, 0, (LPARAM)v)) delete v;
-        DWORD delay = POLL_INTERVAL_MS;
+        DWORD delay = (DWORD)std::max(1, g_pollSeconds.load()) * 1000;
         if (startupPoll < ARRAYSIZE(startupPollDelays)) delay = startupPollDelays[startupPoll++];
         if (WaitForMultipleObjects(2, events, FALSE, delay) == WAIT_OBJECT_0) return 0;
     }
@@ -1061,13 +1197,11 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             if (wp == TIMER_WIDGET) Reconcile();
             return 0;
         case WM_SETTINGCHANGE:
-            if (lp && !lstrcmpW((LPCWSTR)lp, L"ImmersiveColorSet")) {
-                bool light = ReadLightTaskbar();
-                if (light != g_lightTaskbar) { g_lightTaskbar = light; ApplyMenuTheme(light); RedrawAll(); widget::SetLightTheme(light); }
-            }
+            if (lp && !lstrcmpW((LPCWSTR)lp, L"ImmersiveColorSet") && g_themeMode == 0) ApplyEffectiveTheme();
             return 0;
         case WM_DESTROY:
             KillTimer(h, TIMER_WIDGET);
+            ui::CloseAll();
             widget::Destroy();
             SetEvent(g_stopEvt);
             if (g_worker) WaitForSingleObject(g_worker, 5000);
@@ -1171,7 +1305,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
     update::CleanupOldVersion();  // left behind by the update that started this copy
 
-    g_lightTaskbar = ReadLightTaskbar();
+    g_themeMode = LoadThemeMode();
+    g_lightTaskbar = g_themeMode == 1 ? true : g_themeMode == 2 ? false : ReadLightTaskbar();
     ApplyMenuTheme(g_lightTaskbar);
     g_taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
 
@@ -1194,7 +1329,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     g_wantWidget = LoadWidgetMode();
     g_hideLastKnown = LoadHideLastKnown();
     g_widgetBackground = LoadWidgetBackground();
-    g_brandColors = LoadBrandColors();
+    g_accentMode = LoadAccentMode();
+    g_accentColor = LoadAccentColor();
+    g_pollSeconds = LoadPollSeconds();
     g_stacked = LoadStacked();
     widget::SetStacked(g_stacked);
     widget::SetBackground(g_widgetBackground);  // remembered by the widget across re-creation
@@ -1206,7 +1343,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     LoadFavorites();
     g_onlyFavorites = LoadBoolSetting(L"OnlyFavorites", false);
     LoadOrder();
+    ui::SetDarkTheme(!g_lightTaskbar);
     Reconcile();
+    // Opens a window right away (the list fills in with the first poll); used when driving the UI from a script.
+    if (cmdLine && wcsstr(cmdLine, L"--devices")) ShowAllDevices();
+    if (cmdLine && wcsstr(cmdLine, L"--settings")) ShowSettingsWindow();
     UpdatePlaceholder();  // something to click on until the first poll finishes
     SetTimer(g_hwnd, TIMER_WIDGET, 1000, nullptr);
     g_worker = CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr);

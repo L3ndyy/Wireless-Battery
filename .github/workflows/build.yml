@@ -51,9 +51,42 @@ jobs:
           name: WirelessBattery
           path: dist/*
 
+  # The same sources cross-compiled for Windows on ARM (Snapdragon X and friends). Only the main
+  # executable is built: the installer and the portable zip stay x64, and the ARM64 binary is
+  # published next to them for people who prefer it. The tests are not run here because an x64
+  # runner cannot execute ARM64 code.
+  build-arm64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: MINGW64
+          install: make
+
+      - name: Install llvm-mingw (ARM64 cross compiler)
+        shell: pwsh
+        run: |
+          curl.exe -L -o llvm-mingw.zip https://github.com/mstorsjo/llvm-mingw/releases/download/20261117/llvm-mingw-20261117-ucrt-x86_64.zip
+          Expand-Archive llvm-mingw.zip -DestinationPath .
+          "LLVM_MINGW_BIN=$(Join-Path $PWD 'llvm-mingw-20261117-ucrt-x86_64\bin')" >> $env:GITHUB_ENV
+
+      - name: Build WirelessBattery-arm64.exe
+        shell: msys2 {0}
+        run: |
+          export PATH="$(cygpath -u "$LLVM_MINGW_BIN"):$PATH"
+          make CXX=aarch64-w64-mingw32-g++ WINDRES=aarch64-w64-mingw32-windres
+          mv WirelessBattery.exe WirelessBattery-arm64.exe
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: WirelessBattery-arm64
+          path: WirelessBattery-arm64.exe
+
   # Only this job can publish, and only for version tags pushed by the maintainer.
   release:
-    needs: build
+    needs: [build, build-arm64]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -63,6 +96,10 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: WirelessBattery
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: WirelessBattery-arm64
           path: dist
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:

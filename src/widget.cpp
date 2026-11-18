@@ -400,8 +400,8 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         Rgb tc = it.low ? red : fg;
         size_t glyph = out.size();
         slots.push_back({ (int)glyph, (int)glyph + 1, (it.charging || it.wired) ? (int)glyph + 2 : -1 });
-        bool branded = it.accent != Accent::None;
-        BrandColor bc = AccentColor(it.accent, g_light);
+        bool branded = it.accent != Accent::None || it.custom;
+        BrandColor bc = it.custom ? it.customColor : AccentColor(it.accent, g_light);
         Rgb accent{ bc.r, bc.g, bc.b };
         Piece icon{ RenderMask(std::wstring(1, Glyph(it.kind, it.bluetooth)), icons, g_light), branded ? accent : fg, a, Px(5) };
         if (branded && !it.dim) {

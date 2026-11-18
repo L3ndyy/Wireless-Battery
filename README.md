@@ -11,9 +11,9 @@
 
 Battery levels of your wireless mouse, headset, keyboard and controller, right on the Windows taskbar.
 
-> **This build is a fork.** Personal fork of [krisgfx9/Wireless-Device-Battery-Monitor](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor), published at [L3ndyy/Wireless-Battery](https://github.com/L3ndyy/Wireless-Battery). It keeps the original GPL-3.0 license and attribution and adds: VGN DragonFly 3 MasterGT (`391D:1A1A`) support on the same 17-byte protocol as the F2 Ultra+; no more duplicate entry when the F2 Ultra+ switches between its 2.4 GHz dongle and its USB cable; your own device names (*Rename...*), favorites with *Show only favorites*, a separate "USB" mark for a device on its cable without charging; and self-update from this repository's releases (a new version is offered on startup and installed after you confirm). The interface picks Russian automatically on a Russian Windows.
+> **This build is a fork.** Personal fork of [krisgfx9/Wireless-Device-Battery-Monitor](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor), published at [L3ndyy/Wireless-Battery](https://github.com/L3ndyy/Wireless-Battery). It keeps the original GPL-3.0 license and attribution and adds: VGN DragonFly 3 MasterGT (`391D:1A1A`) support on the same 17-byte protocol as the F2 Ultra+; no more duplicate entry when the F2 Ultra+ switches between its 2.4 GHz dongle and its USB cable; your own device names (*Rename...*), favorites with *Show only favorites*, a separate "USB" mark for a device on its cable without charging; a **Settings** window of its own and an **All devices** window with cards you drag to reorder; a manual light/dark theme, a custom accent color (or no accent at all) and a polling-rate choice (1 s / 5 s / 30 s / 1 min); self-update from this repository's releases (a new version is offered on startup and installed after you confirm); and an ARM64 build. The interface picks Russian automatically on a Russian Windows.
 >
-> Сборка с поддержкой VGN DragonFly 3 MasterGT, исправлением двойного устройства, своими именами, избранным и автообновлением. При выходе новой версии приложение само предложит обновиться.
+> Сборка с поддержкой VGN DragonFly 3 MasterGT, исправлением двойного устройства, своими именами, избранным и автообновлением. При выходе новой версии приложение само предложит обновиться. Добавлены отдельное окно настроек, окно «Все устройства» с перетаскиванием карточек, ручной выбор светлой/тёмной темы, свой цвет акцента, частота опроса и сборка для ARM64.
 
 ![Wireless Battery on the taskbar](docs/screenshot.png)
 
@@ -50,14 +50,14 @@ Battery levels of your wireless mouse, headset, keyboard and controller, right o
 
 **Tray icons:** one icon per device with the number drawn in it, plus a "Low battery" notification at 15%. The app switches to this automatically when the taskbar is vertical or can't be found.
 
-Hover for details. Click for the menu: every device (click one to hide or show it), display mode, *Refresh now*, *Start with Windows*, and *Exit*. Levels refresh every 60 seconds, and right away when a device is plugged in or the PC wakes up.
+Hover for details. Click for the menu: *All devices...*, *Settings...*, the device list (each device opens a submenu to show, hide, move, favorite or rename it), *Refresh now*, *Request support for a device...*, *Support the project...*, *Check for updates...* and *Exit*. The display mode, the sleep filter, favorites only, the polling rate, the theme, the accent color, the language, autostart and the monitor live in the **Settings** window and apply as you change them. **All devices** shows every device as a card with its icon, level, source (2.4 GHz receiver, USB cable or Bluetooth) and charging state: drag the cards to set the order, right-click one to hide, favorite or rename it. Levels refresh every 1, 5 or 30 seconds, or every minute, and right away when a device is plugged in or the PC wakes up.
 
 ## Supported devices
 
 | Vendor | Devices | How |
 |---|---|---|
 | **ASTRO** | A50 X (`046D:0B0B`, tested), A50 Gen 5 (`046D:0B1C`), A50 Gen 4 (`9886:002C` tested, `002D`/`002A`), A50 Gen 3 (`9886:0014`/`0015`/`0018`/`001D`/`0026`), A20 Wireless (`9886:0037`–`0045`), via USB base station | Battery percentage, charging and docked status |
-| **Logitech** | Mice and keyboards on Unifying, Bolt, Lightspeed (including the PRO X3 SUPERSTRIKE dongle `046D:C54F`) and Nano receivers, over USB or Bluetooth; G headsets (G533, G535, G633/G635/G733/G933/G935, G PRO/PRO X); G435 on the newer `046D:0ADF` dongle | HID++ 1.0 / 2.0 with feature discovery: unified battery, battery level, voltage, ADC; G435: CRC-16 framed vendor reports, `GET_BATTERY` in mV |
+| **Logitech** | Mice and keyboards on Unifying, Bolt, Lightspeed (including the PRO X3 SUPERSTRIKE dongle `046D:C54F`) and Nano receivers, over USB or Bluetooth; G headsets (G533, G535, G633/G635/G733/G933/G935, G PRO/PRO X); G435 on the newer `046D:0ADF` dongle and on the older `046D:0ACB` receiver | HID++ 1.0 / 2.0 with feature discovery: unified battery, battery level, voltage, ADC; G435: CRC-16 framed vendor reports, `GET_BATTERY` in mV (0ACB: Realtek bridge, asked at most every 10 minutes because each read briefly mutes the audio) |
 | **Razer** | Wireless mice, keyboards and dongles; BlackShark V2 HyperSpeed, V2 Pro (2020/2023), V3 / V3 Pro / V3 X headsets; Barracuda X (2022) on its 2.4 GHz receiver (`1532:0550`); Barracuda Pro (`1532:053A`) | Razer feature-report protocol; BlackShark vendor protocols (V3 / V3 Pro / V3 X queried every 5 min); Barracuda X: Airoha battery and cable queries through the receiver |
 | **SteelSeries** | Arctis 1/7/7+/9/Pro/Pro Wireless, Arctis Nova 3P/5/7/7X/7P/Pro Wireless (including `1038:225D`), Arctis Nova Elite (base station `1038:2244`), GameBuds; Aerox 3/5/9 Wireless, Prime Wireless, Rival 3 Wireless (Gen 2), Rival 650, Rival Pro | Vendor HID reports |
 | **Corsair** | Void / Void Pro / Void Elite / HS70 / HS80 wireless; Bragi devices (Virtuoso, Void V2, HS80 MAX, Slipstream mice and keyboards, including the newer Slipstream receiver `1B1C:2B00`, e.g. Scimitar Elite SE Wireless) | Vendor HID reports, Bragi `GET` (read-only) |
@@ -199,6 +199,8 @@ WirelessBattery.exe --dump     # every HID collection, HID devices that could no
                                # without a HID interface) and Bluetooth devices; also saved to %TEMP%\WirelessBattery-dump.txt
 WirelessBattery.exe --report   # open the "Request support for a device" window
 WirelessBattery.exe --demo     # sample devices of every brand instead of real ones (screenshots, checking colors)
+WirelessBattery.exe --devices  # open the "All devices" window on startup
+WirelessBattery.exe --settings # open the "Settings" window on startup
 WirelessBattery.exe --quit     # close the running instance
 ```
 
@@ -222,6 +224,16 @@ To build the installer and portable zip, install [Inno Setup](https://jrsoftware
 HeadsetControl release and verifies its checksum. GitHub Actions does all of this automatically:
 pushing a tag like `v1.0.0` publishes a release with the installer, the portable zip and the
 HeadsetControl source (as its GPL license requires).
+
+For Windows on ARM (Snapdragon X, Surface Pro 11 and friends) the same sources cross-compile with
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw):
+
+```
+make CXX=aarch64-w64-mingw32-g++ WINDRES=aarch64-w64-mingw32-windres
+```
+
+The release publishes that build as `WirelessBattery-arm64.exe`; it is the same app, without the
+installer.
 
 `WirelessBattery.exe` on its own also works. Without `headsetcontrol.exe` next to it (or on `PATH`) you
 just lose the extra headsets.

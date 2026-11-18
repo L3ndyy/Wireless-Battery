@@ -99,7 +99,8 @@ void PollPulsar(PollContext& ctx);    // Pulsar X2 V3 / X2 V3 eS on 3710 (before
 void PollAtkBitmouse(PollContext& ctx);  // ATK / VXE NK NANO dongle 373B:1216 (before Kysona, same vendor id)
 void PollKysona(PollContext& ctx);    // also Pulsar, ATK / VXE, Hitscan Hyperlight
 void PollHyperX(PollContext& ctx);
-void PollLogitechG435(PollContext& ctx);  // G435 headset on the 046D:0ADF dongle (not HID++)
+void PollLogitechG435(PollContext& ctx);  // G435 headset on the 046D:0ADF / 046D:0ACB dongles (not HID++)
+void PollLogitechG435Acb(PollContext& ctx);  // G435 headset on the older 046D:0ACB dongle (Realtek bridge)
 void PollAstro(PollContext& ctx);  // A50 X / Gen 5 vendor protocol (before generic Logitech)
 void PollLogitech(PollContext& ctx);
 void PollRazer(PollContext& ctx);

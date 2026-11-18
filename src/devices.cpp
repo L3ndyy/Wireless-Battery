@@ -91,6 +91,7 @@ std::vector<DeviceStatus> PollAllDevices() {
     PollBarracudaPro(ctx);   // before the generic Razer driver as well
     PollHyperX(ctx);
     PollLogitechG435(ctx);  // before the HID++ driver, which shares the vendor id
+    PollLogitechG435Acb(ctx);  // the older G435 dongle: Realtek bridge, feature-report replies
     PollAstro(ctx);
     PollLogitech(ctx);
     PollRazer(ctx);

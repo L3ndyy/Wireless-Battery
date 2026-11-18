@@ -2,7 +2,7 @@
 // vendor collection (FF00:0001, unnumbered 64-byte reports) carries CRC-16 framed messages, and
 // "PA" commands inside them reach the headset's radio SoC. The battery is read with the OTA
 // GET_BATTERY command (millivolts). The older 046D:0ACB dongle uses a different transport and is
-// not handled here.
+// handled by logitech_g435_0acb.cpp.
 //
 // Session, as captured by portyporty: open (84 01), 85 01, session init (OTA IOCTL_READ_MAX_LEN),
 // REMOTE_GET_MODE / REMOTE_SET_MODE 01 / REMOTE_GET_MODE so the query is forwarded to the headset
