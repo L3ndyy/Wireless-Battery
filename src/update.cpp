@@ -186,7 +186,7 @@ void Info(const std::wstring& text, UINT flags) {
 // Replaces the running exe. Tries in-process first (per-user and portable installs), then asks for
 // administrator rights through the downloaded exe itself for Program Files installs.
 // 1 = installed, 0 = failed, -1 = the user declined the administrator prompt.
-int InstallUpdate(HWND owner, const std::wstring& downloaded) {
+int InstallUpdate(const std::wstring& downloaded) {
     std::wstring target = SelfPath();
     if (target.empty()) return 0;
     std::wstring old = target + L".old";
@@ -253,7 +253,7 @@ void CheckAndPrompt(HWND owner, bool manual) {
         return;
     }
     std::wstring target = SelfPath();
-    int installed = InstallUpdate(owner, file);
+    int installed = InstallUpdate(file);
     if (installed == -1) {
         Info(T(L"Update canceled."), MB_OK | MB_ICONINFORMATION);
         return;
