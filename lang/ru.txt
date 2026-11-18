@@ -100,3 +100,14 @@ USB base station = базовая станция USB
 USB cable = USB-кабель
 UWB base station = базовая станция UWB
 Wireless adapter = Беспроводной адаптер
+
+# Self-update
+Check for updates... = Проверить обновления...
+Update = Обновление
+Update canceled. = Обновление отменено.
+Could not check for updates. Check your connection. = Не удалось проверить обновления. Проверьте подключение к интернету.
+You have the latest version ({version}). = У вас последняя версия ({version}).
+A new version is available: {version} (you have {current}). Update now? = Доступна новая версия: {version} (у вас {current}). Обновить сейчас?
+The update could not be downloaded. Try again later. = Не удалось скачать обновление. Попробуйте позже.
+The update could not be installed. Try again later. = Не удалось установить обновление. Попробуйте позже.
+The update is ready. Wireless Battery will restart. = Обновление готово. Wireless Battery перезапустится.

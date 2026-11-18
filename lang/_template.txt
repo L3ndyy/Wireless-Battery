@@ -113,3 +113,14 @@ USB base station =
 USB cable = 
 UWB base station = 
 Wireless adapter = 
+
+# Self-update
+Check for updates... = 
+Update = 
+Update canceled. = 
+Could not check for updates. Check your connection. = 
+You have the latest version ({version}). = 
+A new version is available: {version} (you have {current}). Update now? = 
+The update could not be downloaded. Try again later. = 
+The update could not be installed. Try again later. = 
+The update is ready. Wireless Battery will restart. = 

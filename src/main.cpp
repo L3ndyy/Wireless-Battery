@@ -17,6 +17,7 @@
 #include "i18n.h"
 #include "labels.h"
 #include "report.h"
+#include "update.h"
 #include "widget.h"
 
 namespace {
@@ -32,7 +33,7 @@ constexpr UINT PLACEHOLDER_ID = 1;
 
 enum MenuId : UINT {
     ID_REFRESH = 100, ID_AUTOSTART, ID_HIDE_LAST_KNOWN, ID_WIDGET_BACKGROUND, ID_EXIT, ID_MODE_WIDGET, ID_MODE_TRAY, ID_SUPPORT, ID_REPORT,
-    ID_BRAND_COLORS, ID_STACKED,
+    ID_BRAND_COLORS, ID_STACKED, ID_UPDATE,
     ID_LANG_AUTO = 400, ID_LANG_ADD, ID_LANG_FIRST,  // "Language": ID_LANG_FIRST + 0..63
     ID_MONITOR_ALL = 300, ID_MONITOR_MAIN, ID_MONITOR_FIRST,  // "Show the widget on": ID_MONITOR_FIRST + 0..31
     ID_DEVICE_FIRST = 1000
@@ -627,6 +628,8 @@ void MoveEntry(const std::wstring& key, int dir) {
     UpdateWidget();
 }
 
+void StartUpdateCheck(bool manual);
+
 void ShowMenu() {
     ApplyMenuTheme(g_lightTaskbar);
     HMENU m = CreatePopupMenu();
@@ -703,6 +706,7 @@ void ShowMenu() {
     AppendMenuW(m, MF_STRING | (AutostartEnabled() ? MF_CHECKED : 0), ID_AUTOSTART, T(L"Start with Windows"));
     AppendMenuW(m, MF_STRING, ID_REPORT, T(L"Request support for a device..."));
     AppendMenuW(m, MF_STRING, ID_SUPPORT, T(L"Support the project..."));
+    AppendMenuW(m, MF_STRING, ID_UPDATE, T(L"Check for updates..."));
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, ID_EXIT, T(L"Exit"));
     POINT pt;
@@ -727,6 +731,7 @@ void ShowMenu() {
         case ID_MODE_TRAY: SetMode(false); break;
         case ID_SUPPORT: ShellExecuteW(nullptr, L"open", L"https://github.com/sponsors/krisgfx9", nullptr, nullptr, SW_SHOWNORMAL); break;
         case ID_REPORT: report::Show(g_inst, g_hwnd); break;
+        case ID_UPDATE: StartUpdateCheck(true); break;
         case ID_EXIT: DestroyWindow(g_hwnd); break;
         default:
             if (cmd >= ID_LANG_FIRST && cmd < ID_LANG_FIRST + languages.size()) {
@@ -750,6 +755,27 @@ void ShowMenu() {
 // brand colors without owning the hardware. Keys, vendor ids and names are mixed on purpose, so every way
 // of recognising a brand gets used.
 bool g_demo = false;
+
+// ---- self-update ------------------------------------------------------------------------------
+
+HANDLE g_updateThread = nullptr;
+
+DWORD WINAPI UpdateCheckThread(LPVOID manual) {
+    if (!manual) {
+        Sleep(2500);  // let the tray icon and the first poll appear first
+        if (g_demo) return 0;
+    }
+    update::CheckAndPrompt(g_hwnd, manual != nullptr);
+    return 0;
+}
+
+void StartUpdateCheck(bool manual) {
+    if (g_updateThread) {
+        if (WaitForSingleObject(g_updateThread, 0) == WAIT_TIMEOUT) return;  // a check is already running
+        CloseHandle(g_updateThread);
+    }
+    g_updateThread = CreateThread(nullptr, 0, UpdateCheckThread, manual ? (LPVOID)1 : nullptr, 0, nullptr);
+}
 
 std::vector<DeviceStatus> DemoDevices() {
     auto make = [](const wchar_t* key, const wchar_t* name, DeviceKind kind, int pct, unsigned short vid, bool charging) {
@@ -920,6 +946,7 @@ int ListToConsole(bool dump) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
+    if (cmdLine && wcsstr(cmdLine, L"--apply-update")) return update::ApplyFromCommandLine(cmdLine);
     if (cmdLine && wcsstr(cmdLine, L"--list")) return ListToConsole(false);
     if (cmdLine && wcsstr(cmdLine, L"--dump")) return ListToConsole(true);
     if (cmdLine && wcsstr(cmdLine, L"--report")) {  // the "Request support for a device" window on its own
@@ -945,6 +972,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
 
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\WirelessBatteryTray");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
+    update::CleanupOldVersion();  // left behind by the update that started this copy
 
     g_lightTaskbar = ReadLightTaskbar();
     ApplyMenuTheme(g_lightTaskbar);
@@ -982,6 +1010,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     UpdatePlaceholder();  // something to click on until the first poll finishes
     SetTimer(g_hwnd, TIMER_WIDGET, 1000, nullptr);
     g_worker = CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr);
+    StartUpdateCheck(false);  // asks about a newer release a couple of seconds after startup
 
     MSG m;
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {
@@ -993,6 +1022,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     while (PeekMessageW(&m, nullptr, WM_RESULTS, WM_RESULTS, PM_REMOVE)) delete reinterpret_cast<std::vector<DeviceStatus>*>(m.lParam);
     if (notify) UnregisterDeviceNotification(notify);
     if (g_worker) CloseHandle(g_worker);
+    if (g_updateThread) {
+        WaitForSingleObject(g_updateThread, 3000);
+        CloseHandle(g_updateThread);
+    }
     ReleaseMutex(mutex);
     return 0;
 }

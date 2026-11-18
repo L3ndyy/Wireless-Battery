@@ -11,6 +11,10 @@
 
 Battery levels of your wireless mouse, headset, keyboard and controller, right on the Windows taskbar.
 
+> **This build is a fork.** Personal fork of [krisgfx9/Wireless-Device-Battery-Monitor](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor), published at [L3ndyy/Wireless-Battery](https://github.com/L3ndyy/Wireless-Battery). It keeps the original GPL-3.0 license and attribution and adds two things: the VGN DragonFly F2 Ultra+ no longer appears twice when it switches between the 2.4 GHz dongle and the USB cable, and the app updates itself from this repository's releases (a new version is offered on startup and installed after you confirm). The interface picks Russian automatically on a Russian Windows.
+>
+> Сборка с исправлением двойного устройства у VGN и автообновлением. При выходе новой версии приложение само предложит обновиться.
+
 ![Wireless Battery on the taskbar](docs/screenshot.png)
 
 > **Just want it working?** Download **[WirelessBattery-Setup](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor/releases/latest)** from the latest release, run it and click through. That's it.
@@ -165,9 +169,9 @@ Also hardware-tested: EPOMAKER EA75 on its `05AC:024F` 2.4 GHz receiver, using t
 
 ## Install
 
-[![Latest version](https://img.shields.io/github/v/release/krisgfx9/Wireless-Device-Battery-Monitor?label=latest%20version&style=for-the-badge)](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor/releases/latest)
+[![Latest version](https://img.shields.io/github/v/release/L3ndyy/Wireless-Battery?label=latest%20version&style=for-the-badge)](https://github.com/L3ndyy/Wireless-Battery/releases/latest)
 
-1. Download **`WirelessBattery-Setup-<version>.exe`** from the [latest release](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor/releases/latest).
+1. Download **`WirelessBattery-Setup-<version>.exe`** from the [latest release](https://github.com/L3ndyy/Wireless-Battery/releases/latest).
 2. Run it and click through. It needs **no administrator rights** and **nothing else installed**: no
    runtimes, no drivers, no vendor apps. HeadsetControl comes bundled.
 
@@ -179,6 +183,10 @@ anywhere and run `WirelessBattery.exe`.
 - **SmartScreen warning:** the exe is not code-signed, so Windows may say "Windows protected your PC". Click *More info → Run anyway*, or build it yourself.
 - **Tray-icon mode on Windows 11:** new tray icons go to the `^` overflow. Drag them onto the taskbar or enable them in *Settings → Personalization → Taskbar → Other system tray icons*.
 - **Keeping the app away from a device:** if a device misbehaves while the app is running, list it in the registry string `IgnoreDevices` under `HKCU\Software\WirelessBattery` as `VID:PID` pairs (hex, separated by commas, e.g. `28BD:0947, 1234:ABCD`; `--dump` shows the ids). The app then never opens it. Drawing tablets are skipped automatically.
+
+## Updates
+
+A few seconds after startup the app asks GitHub for the latest release of [L3ndyy/Wireless-Battery](https://github.com/L3ndyy/Wireless-Battery). When it is newer than the running version, a window offers to update; **Yes** downloads `WirelessBattery.exe` from that release, swaps it in (asking for administrator rights only when the app sits in `Program Files`) and restarts. **No** just closes the window, and the offer comes back on the next start. *Check for updates...* in the menu does the same check on demand and also tells you when you are already up to date.
 
 ## Command line
 
