@@ -9,7 +9,6 @@
 #include <shellapi.h>
 
 #include <cctype>
-#include <cstdio>
 #include <vector>
 
 #include "i18n.h"
@@ -166,18 +165,22 @@ std::wstring SelfPath() {
 
 void RestartAfterExit(const std::wstring& exe) {
     // The old process is still alive for a moment and holds the single-instance mutex; let it exit
-    // first, then start the new exe as this (medium integrity) process, not elevated.
-    std::wstring cmd = L"/c ping -n 4 127.0.0.1 >nul & start \"\" \"" + exe + L"\"";
+    // first, then start the new exe as this (medium integrity) process, not elevated. The command line
+    // has to start with cmd.exe itself: CreateProcess with a separate lpApplicationName fails here.
+    std::wstring cmd = L"cmd.exe /c ping -n 4 127.0.0.1 >nul & start \"\" \"" + exe + L"\"";
     STARTUPINFOW si{ sizeof(si) };
     PROCESS_INFORMATION pi{};
-    if (CreateProcessW(L"cmd.exe", cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
     }
 }
 
-void Info(HWND owner, const std::wstring& text, UINT flags) {
-    MessageBoxW(owner, text.c_str(), T(L"Update"), flags | MB_SETFOREGROUND | MB_TOPMOST);
+// The dialogs have no owner window on purpose: the app's window is a hidden 0x0 window at (0,0), and a
+// MessageBox owned by it is centred on that empty rect, i.e. mostly off the top-left corner of the
+// screen where nobody sees it. Without an owner Windows centres the box on the monitor, on top.
+void Info(const std::wstring& text, UINT flags) {
+    MessageBoxW(nullptr, text.c_str(), T(L"Update"), flags | MB_SETFOREGROUND | MB_TOPMOST);
 }
 
 // Replaces the running exe. Tries in-process first (per-user and portable installs), then asks for
@@ -218,26 +221,26 @@ void CheckAndPrompt(HWND owner, bool manual) {
     int status = 0;
     bool ok = HttpGet(kApiHost, kLatestPath, json, status, L"");
     if (!ok || status != 200) {
-        if (manual) Info(owner, T(L"Could not check for updates. Check your connection."), MB_OK | MB_ICONWARNING);
+        if (manual) Info(T(L"Could not check for updates. Check your connection."), MB_OK | MB_ICONWARNING);
         return;
     }
     std::wstring latest = Utf8(JsonString(json, "tag_name"));
     if (latest.empty()) {
-        if (manual) Info(owner, T(L"Could not check for updates. Check your connection."), MB_OK | MB_ICONWARNING);
+        if (manual) Info(T(L"Could not check for updates. Check your connection."), MB_OK | MB_ICONWARNING);
         return;
     }
     if (CompareVersions(latest, WB_VERSION) <= 0) {
-        if (manual) Info(owner, TF(L"You have the latest version ({version}).", { { L"version", WB_VERSION } }), MB_OK | MB_ICONINFORMATION);
+        if (manual) Info(TF(L"You have the latest version ({version}).", { { L"version", WB_VERSION } }), MB_OK | MB_ICONINFORMATION);
         return;
     }
     std::wstring url = FindAssetUrl(json);
     if (url.empty()) {
-        if (manual) Info(owner, T(L"Could not check for updates. Check your connection."), MB_OK | MB_ICONWARNING);
+        if (manual) Info(T(L"Could not check for updates. Check your connection."), MB_OK | MB_ICONWARNING);
         return;
     }
     std::wstring text = TF(L"A new version is available: {version} (you have {current}). Update now?",
                            { { L"version", latest }, { L"current", WB_VERSION } });
-    if (MessageBoxW(owner, text.c_str(), T(L"Update"), MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND | MB_TOPMOST) != IDYES)
+    if (MessageBoxW(nullptr, text.c_str(), T(L"Update"), MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND | MB_TOPMOST) != IDYES)
         return;
 
     wchar_t tempDir[MAX_PATH] = {};
@@ -246,20 +249,20 @@ void CheckAndPrompt(HWND owner, bool manual) {
     DeleteFileW(file.c_str());
     std::wstring host, path;
     if (!SplitUrl(url, host, path) || !HttpGet(host, path, json, status, file) || status < 200 || status > 299) {
-        Info(owner, T(L"The update could not be downloaded. Try again later."), MB_OK | MB_ICONWARNING);
+        Info(T(L"The update could not be downloaded. Try again later."), MB_OK | MB_ICONWARNING);
         return;
     }
     std::wstring target = SelfPath();
     int installed = InstallUpdate(owner, file);
     if (installed == -1) {
-        Info(owner, T(L"Update canceled."), MB_OK | MB_ICONINFORMATION);
+        Info(T(L"Update canceled."), MB_OK | MB_ICONINFORMATION);
         return;
     }
     if (installed != 1) {
-        Info(owner, T(L"The update could not be installed. Try again later."), MB_OK | MB_ICONWARNING);
+        Info(T(L"The update could not be installed. Try again later."), MB_OK | MB_ICONWARNING);
         return;
     }
-    Info(owner, T(L"The update is ready. Wireless Battery will restart."), MB_OK | MB_ICONINFORMATION);
+    Info(T(L"The update is ready. Wireless Battery will restart."), MB_OK | MB_ICONINFORMATION);
     RestartAfterExit(target);
     PostMessageW(owner, WM_CLOSE, 0, 0);
 }
