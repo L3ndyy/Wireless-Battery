@@ -11,9 +11,9 @@
 
 Battery levels of your wireless mouse, headset, keyboard and controller, right on the Windows taskbar.
 
-> **This build is a fork.** Personal fork of [krisgfx9/Wireless-Device-Battery-Monitor](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor), published at [L3ndyy/Wireless-Battery](https://github.com/L3ndyy/Wireless-Battery). It keeps the original GPL-3.0 license and attribution and adds two things: the VGN DragonFly F2 Ultra+ no longer appears twice when it switches between the 2.4 GHz dongle and the USB cable, and the app updates itself from this repository's releases (a new version is offered on startup and installed after you confirm). The interface picks Russian automatically on a Russian Windows.
+> **This build is a fork.** Personal fork of [krisgfx9/Wireless-Device-Battery-Monitor](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor), published at [L3ndyy/Wireless-Battery](https://github.com/L3ndyy/Wireless-Battery). It keeps the original GPL-3.0 license and attribution and adds: VGN DragonFly 3 MasterGT (`391D:1A1A`) support on the same 17-byte protocol as the F2 Ultra+; no more duplicate entry when the F2 Ultra+ switches between its 2.4 GHz dongle and its USB cable; your own device names (*Rename...*), favorites with *Show only favorites*, a separate "USB" mark for a device on its cable without charging; and self-update from this repository's releases (a new version is offered on startup and installed after you confirm). The interface picks Russian automatically on a Russian Windows.
 >
-> Сборка с исправлением двойного устройства у VGN и автообновлением. При выходе новой версии приложение само предложит обновиться.
+> Сборка с поддержкой VGN DragonFly 3 MasterGT, исправлением двойного устройства, своими именами, избранным и автообновлением. При выходе новой версии приложение само предложит обновиться.
 
 ![Wireless Battery on the taskbar](docs/screenshot.png)
 
@@ -39,6 +39,9 @@ Battery levels of your wireless mouse, headset, keyboard and controller, right o
 - **Several monitors:** the widget shows on every monitor's taskbar, next to its clock, so it stays visible while a game runs fullscreen. *Show the widget on* in the menu picks *All monitors*, *Main monitor only*, or one display (e.g. only *Display 3*).
 - **More display options:** *Icons above percentages* stacks each icon over its level to save width; *Brand colors* shows known brands in their color (Razer green, HyperX red, ...) with a small level bar; two devices of the same kind get a tiny caption so they can be told apart; left and right taskbars get a column of devices.
 - **Languages:** English, العربية, Deutsch, Español, Français, עברית, 日本語, Polski, Português (Brasil), Русский, Türkçe, 简体中文 and 繁體中文. The app follows the Windows display language; *Language* in the menu picks another one. See [Translations](#translations) to add or improve a language.
+- **Your own names:** *Rename...* in a device's menu replaces a long factory name with a short one ("Mouse", "Headphones"). Clear the box to get the factory name back.
+- **Favorites:** mark the devices you care about with *Favorite* and turn on *Show only favorites* to keep just those on the taskbar.
+- **Wired indicator:** a device on its USB cable shows a small `USB` mark after the level; the blue bolt means it is actually charging, so the two are no longer confused.
 - **Brand colors:** devices of 15 known brands get their maker's color, with a soft glow and a thin level bar under the
   percentage: Razer green, Logitech blue, SteelSeries orange, Corsair yellow, HyperX / ROG / ZOWIE red, PlayStation,
   Xbox, Samsung, Apple, Jabra, JBL, Cooler Master and Steam. Each color has a dark- and a light-taskbar shade. The brand

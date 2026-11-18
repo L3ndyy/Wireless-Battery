@@ -111,3 +111,11 @@ A new version is available: {version} (you have {current}). Update now? = Дос
 The update could not be downloaded. Try again later. = Не удалось скачать обновление. Попробуйте позже.
 The update could not be installed. Try again later. = Не удалось установить обновление. Попробуйте позже.
 The update is ready. Wireless Battery will restart. = Обновление готово. Wireless Battery перезапустится.
+
+# Device menu: favorites and the user's own names
+Favorite = Избранное
+Rename... = Переименовать...
+Show only favorites = Показывать только избранные
+Device name = Имя устройства
+OK = ОК
+Cancel = Отмена

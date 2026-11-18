@@ -182,13 +182,14 @@ void Info(HWND owner, const std::wstring& text, UINT flags) {
 
 // Replaces the running exe. Tries in-process first (per-user and portable installs), then asks for
 // administrator rights through the downloaded exe itself for Program Files installs.
-bool InstallUpdate(HWND owner, const std::wstring& downloaded) {
+// 1 = installed, 0 = failed, -1 = the user declined the administrator prompt.
+int InstallUpdate(HWND owner, const std::wstring& downloaded) {
     std::wstring target = SelfPath();
-    if (target.empty()) return false;
+    if (target.empty()) return 0;
     std::wstring old = target + L".old";
 
     if (MoveFileExW(target.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-        if (CopyFileW(downloaded.c_str(), target.c_str(), FALSE)) return true;
+        if (CopyFileW(downloaded.c_str(), target.c_str(), FALSE)) return 1;
         MoveFileExW(old.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING);  // put the old one back
     }
 
@@ -200,15 +201,12 @@ bool InstallUpdate(HWND owner, const std::wstring& downloaded) {
     sei.lpFile = downloaded.c_str();
     sei.lpParameters = args.c_str();
     sei.nShow = SW_HIDE;
-    if (!ShellExecuteExW(&sei)) {
-        if (GetLastError() == ERROR_CANCELLED) Info(owner, T(L"Update canceled."), MB_OK | MB_ICONINFORMATION);
-        return false;
-    }
+    if (!ShellExecuteExW(&sei)) return GetLastError() == ERROR_CANCELLED ? -1 : 0;
     WaitForSingleObject(sei.hProcess, 60000);
     DWORD code = 1;
     GetExitCodeProcess(sei.hProcess, &code);
     CloseHandle(sei.hProcess);
-    return code == 0;
+    return code == 0 ? 1 : 0;
 }
 
 }  // namespace
@@ -252,7 +250,12 @@ void CheckAndPrompt(HWND owner, bool manual) {
         return;
     }
     std::wstring target = SelfPath();
-    if (!InstallUpdate(owner, file)) {
+    int installed = InstallUpdate(owner, file);
+    if (installed == -1) {
+        Info(owner, T(L"Update canceled."), MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (installed != 1) {
         Info(owner, T(L"The update could not be installed. Try again later."), MB_OK | MB_ICONWARNING);
         return;
     }

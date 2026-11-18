@@ -54,6 +54,7 @@ std::vector<DeviceStatus> PollAllDevices() {
     PollAtkKeyboard(ctx);
     PollPulsar(ctx);     // before Kysona, which also scans the 3710 vendor id
     PollAtkBitmouse(ctx);  // before Kysona, which would probe the NK dongle with the wrong protocol
+    PollRongyuan(ctx);    // before Kysona, which shares the 391D vendor id and would probe its receivers
     PollKysona(ctx);
     PollKeychron(ctx);
     PollCherry(ctx);
@@ -66,7 +67,6 @@ std::vector<DeviceStatus> PollAllDevices() {
     PollFinalmouse(ctx);
     PollNinjutso(ctx);
     PollSprime(ctx);
-    PollRongyuan(ctx);
     PollSonix(ctx);
     PollSemico(ctx);
     PollSonyInzone(ctx);

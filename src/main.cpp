@@ -33,12 +33,12 @@ constexpr UINT PLACEHOLDER_ID = 1;
 
 enum MenuId : UINT {
     ID_REFRESH = 100, ID_AUTOSTART, ID_HIDE_LAST_KNOWN, ID_WIDGET_BACKGROUND, ID_EXIT, ID_MODE_WIDGET, ID_MODE_TRAY, ID_SUPPORT, ID_REPORT,
-    ID_BRAND_COLORS, ID_STACKED, ID_UPDATE,
+    ID_BRAND_COLORS, ID_STACKED, ID_UPDATE, ID_ONLY_FAVORITES,
     ID_LANG_AUTO = 400, ID_LANG_ADD, ID_LANG_FIRST,  // "Language": ID_LANG_FIRST + 0..63
     ID_MONITOR_ALL = 300, ID_MONITOR_MAIN, ID_MONITOR_FIRST,  // "Show the widget on": ID_MONITOR_FIRST + 0..31
     ID_DEVICE_FIRST = 1000
 };
-enum DeviceCmd : UINT { DEV_TOGGLE, DEV_LEFT, DEV_RIGHT, DEV_STRIDE = 4 };
+enum DeviceCmd : UINT { DEV_TOGGLE, DEV_LEFT, DEV_RIGHT, DEV_FAVORITE, DEV_RENAME, DEV_STRIDE = 6 };
 
 const wchar_t* kAppName = L"Wireless Battery";
 const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -127,6 +127,60 @@ void SaveHidden() {
 
 bool IsHidden(const std::wstring& key) { return g_hidden.count(key) != 0; }
 
+// The user's own short names for devices ("Mouse", "Headphones"), stored as a REG_MULTI_SZ of
+// "key=name". The key belongs to the device (from the driver), so a name survives replugging.
+std::map<std::wstring, std::wstring> g_names;
+
+void LoadNames() {
+    DWORD size = 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"DeviceNames", RRF_RT_REG_MULTI_SZ, nullptr, nullptr, &size) != ERROR_SUCCESS || !size)
+        return;
+    std::vector<wchar_t> buf(size / sizeof(wchar_t) + 1, 0);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"DeviceNames", RRF_RT_REG_MULTI_SZ, nullptr, buf.data(), &size) != ERROR_SUCCESS)
+        return;
+    for (const wchar_t* p = buf.data(); *p; p += wcslen(p) + 1) {
+        std::wstring entry = p;
+        size_t eq = entry.find(L'=');
+        if (eq != std::wstring::npos && eq > 0 && eq + 1 < entry.size()) g_names[entry.substr(0, eq)] = entry.substr(eq + 1);
+    }
+}
+
+void SaveNames() {
+    std::wstring multi;
+    for (const auto& [key, name] : g_names) { multi += key + L"=" + name; multi.push_back(L'\0'); }
+    multi.push_back(L'\0');
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"DeviceNames", REG_MULTI_SZ, multi.data(), (DWORD)(multi.size() * sizeof(wchar_t)));
+}
+
+// The name to show: the user's own one, or the name the driver found.
+std::wstring DisplayName(const DeviceStatus& s) {
+    auto it = g_names.find(s.key);
+    return it != g_names.end() ? it->second : s.name;
+}
+
+// Favorites: keep the interesting devices on the taskbar and hide the rest with one switch.
+std::set<std::wstring> g_favorites;
+bool g_onlyFavorites = false;
+
+void LoadFavorites() {
+    DWORD size = 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"FavoriteDevices", RRF_RT_REG_MULTI_SZ, nullptr, nullptr, &size) != ERROR_SUCCESS || !size)
+        return;
+    std::vector<wchar_t> buf(size / sizeof(wchar_t) + 1, 0);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"FavoriteDevices", RRF_RT_REG_MULTI_SZ, nullptr, buf.data(), &size) != ERROR_SUCCESS)
+        return;
+    for (const wchar_t* p = buf.data(); *p; p += wcslen(p) + 1) g_favorites.insert(p);
+}
+
+void SaveFavorites() {
+    std::wstring multi;
+    for (const auto& k : g_favorites) { multi += k; multi.push_back(L'\0'); }
+    multi.push_back(L'\0');
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"FavoriteDevices", REG_MULTI_SZ, multi.data(), (DWORD)(multi.size() * sizeof(wchar_t)));
+}
+
+bool IsFavorite(const std::wstring& key) { return g_favorites.count(key) != 0; }
+
 // The user's left-to-right order (device keys), stored as a REG_MULTI_SZ. Devices not in it follow
 // in the default order (by type, then name).
 std::vector<std::wstring> g_order;
@@ -150,7 +204,8 @@ void SaveOrder() {
 }
 
 bool IsEntryHidden(const TrayEntry& e) {
-    return IsHidden(e.st.key) || (g_hideLastKnown && (e.st.asleep || (e.st.percent < 0 && e.lastPct >= 0)));
+    return IsHidden(e.st.key) || (g_onlyFavorites && !IsFavorite(e.st.key)) ||
+           (g_hideLastKnown && (e.st.asleep || (e.st.percent < 0 && e.lastPct >= 0)));
 }
 
 bool LoadBoolSetting(const wchar_t* name, bool defaultVal) {
@@ -408,7 +463,8 @@ void ApplyEntry(TrayEntry& e) {
         e.icon = IconFor(shown, s.charging, dim, accent);
         e.iconSig = sig;
     }
-    std::wstring tip = s.name + L"\n" + StatusText(e);
+    std::wstring tip = DisplayName(s) + L"\n" + StatusText(e);
+    if (s.via == L"USB cable" && !s.charging) tip += std::wstring(L", ") + T(L"USB cable");
 
     const wchar_t* infoTitle = nullptr;
     std::wstring info;
@@ -416,7 +472,7 @@ void ApplyEntry(TrayEntry& e) {
     if (!s.charging && s.percent >= 0 && s.percent <= LOW_BATTERY && !e.lowWarned) {
         e.lowWarned = true;
         infoTitle = T(L"Low battery");
-        info = TF(L"{name} is at {percent}%", { { L"name", s.name }, { L"percent", std::to_wstring(s.percent) } });
+        info = TF(L"{name} is at {percent}%", { { L"name", DisplayName(s) }, { L"percent", std::to_wstring(s.percent) } });
     }
     TrayCall(e.added ? NIM_MODIFY : NIM_ADD, e.uid, e.icon, tip, infoTitle, info);
     e.added = true;
@@ -461,7 +517,7 @@ void UpdateWidget() {
     std::vector<TrayEntry*> list = OrderedEntries(true);
     // Two devices of one kind share an icon: give each a tiny caption so they can be told apart.
     std::vector<LabelInput> labelIn;
-    for (auto* e : list) labelIn.push_back({ e->st.kind, e->st.name });
+    for (auto* e : list) labelIn.push_back({ e->st.kind, DisplayName(e->st) });
     std::vector<std::wstring> labels = ShortLabels(labelIn, 3);
     std::vector<WidgetItem> items;
     std::wstring tip;
@@ -471,6 +527,7 @@ void UpdateWidget() {
         it.percent = e->st.percent >= 0 ? e->st.percent : e->lastPct;
         if (e->st.percent >= 0) it.text = T(e->st.levelText);
         it.charging = e->st.charging;
+        it.wired = e->st.via == L"USB cable" && !e->st.charging;
         it.dim = e->st.percent < 0;
         it.low = !it.charging && it.percent >= 0 && it.percent <= LOW_BATTERY;
         it.bluetooth = e->st.via == L"Bluetooth";
@@ -478,7 +535,7 @@ void UpdateWidget() {
         it.accent = AccentFor(e->st);
         items.push_back(it);
         if (!tip.empty()) tip += L"\n";
-        tip += e->st.name + L": " + StatusText(*e);
+        tip += DisplayName(e->st) + L": " + StatusText(*e);
     }
     if (tip.empty()) tip = std::wstring(L"Wireless Battery: ") + T(L"No devices with battery info found");
     widget::SetItems(items, tip);
@@ -611,6 +668,132 @@ void ToggleHidden(const std::wstring& key) {
     UpdateWidget();
 }
 
+// An empty name (or the factory one) restores the name the driver found.
+void SetDeviceName(const std::wstring& key, const std::wstring& factory, const std::wstring& name) {
+    if (name.empty() || name == factory) g_names.erase(key);
+    else g_names[key] = name;
+    SaveNames();
+    auto it = g_entries.find(key);
+    if (it != g_entries.end()) ApplyEntry(it->second);
+    UpdateWidget();
+}
+
+void ToggleFavorite(const std::wstring& key) {
+    if (!g_favorites.erase(key)) g_favorites.insert(key);
+    SaveFavorites();
+    auto it = g_entries.find(key);
+    if (it != g_entries.end()) ApplyEntry(it->second);
+    UpdatePlaceholder();
+    UpdateWidget();
+}
+
+void SetOnlyFavorites(bool on) {
+    g_onlyFavorites = on;
+    SaveBoolSetting(L"OnlyFavorites", on);
+    for (auto& [k, e] : g_entries) ApplyEntry(e);
+    UpdatePlaceholder();
+    UpdateWidget();
+}
+
+// ---- renaming a device ------------------------------------------------------------------------
+
+struct RenameState {
+    std::wstring name;
+    bool done = false, ok = false;
+};
+
+LRESULT CALLBACK RenameProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
+    auto* st = reinterpret_cast<RenameState*>(GetWindowLongPtrW(wnd, GWLP_USERDATA));
+    switch (msg) {
+        case WM_COMMAND:
+            if (!st) break;
+            if (LOWORD(wp) == IDOK) {
+                wchar_t buf[128] = {};
+                GetDlgItemTextW(wnd, 101, buf, ARRAYSIZE(buf));
+                st->name = buf;
+                st->ok = true;
+                DestroyWindow(wnd);
+            } else if (LOWORD(wp) == IDCANCEL) {
+                DestroyWindow(wnd);
+            }
+            return 0;
+        case WM_CLOSE:
+            DestroyWindow(wnd);
+            return 0;
+        case WM_DESTROY:
+            if (st) st->done = true;
+            return 0;
+    }
+    return DefWindowProcW(wnd, msg, wp, lp);
+}
+
+// Asks for a shorter name ("Mouse", "Headphones"); the factory name is shown above the box, and an
+// empty box restores it. Blocks until the little window closes (the device poller keeps running).
+std::wstring AskDeviceName(const std::wstring& current, const std::wstring& factory) {
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc{ sizeof(wc) };
+        wc.lpfnWndProc = RenameProc;
+        wc.hInstance = g_inst;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        wc.lpszClassName = L"WirelessBatteryRename";
+        RegisterClassExW(&wc);
+        registered = true;
+    }
+    UINT dpi = g_hwnd ? GetDpiForWindow(g_hwnd) : 0;
+    if (!dpi) dpi = 96;
+    auto S = [dpi](int v) { return MulDiv(v, (int)dpi, 96); };
+    RECT rc{ 0, 0, S(420), S(150) };
+    DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU, exStyle = WS_EX_DLGMODALFRAME;
+    AdjustWindowRectEx(&rc, style, FALSE, exStyle);
+    int w = rc.right - rc.left, h = rc.bottom - rc.top;
+    POINT pt;
+    GetCursorPos(&pt);
+    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{ sizeof(mi) };
+    GetMonitorInfoW(mon, &mi);
+    int x = mi.rcWork.left + ((mi.rcWork.right - mi.rcWork.left) - w) / 2;
+    int y = mi.rcWork.top + ((mi.rcWork.bottom - mi.rcWork.top) - h) / 2;
+    HWND wnd = CreateWindowExW(exStyle, L"WirelessBatteryRename", T(L"Device name"), style, x, y, w, h, g_hwnd,
+                               nullptr, g_inst, nullptr);
+    if (!wnd) return current;
+    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    auto child = [&](const wchar_t* cls, const wchar_t* text, DWORD childStyle, int cx, int cy, int cw, int ch, int id,
+                     DWORD childEx = 0) {
+        HWND c = CreateWindowExW(childEx, cls, text, WS_CHILD | WS_VISIBLE | childStyle, cx, cy, cw, ch, wnd,
+                                 (HMENU)(INT_PTR)id, g_inst, nullptr);
+        if (c) SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
+        return c;
+    };
+    child(L"STATIC", factory.c_str(), SS_ENDELLIPSIS, S(16), S(14), S(420) - S(32), S(20), -1);
+    child(L"EDIT", current.c_str(), ES_AUTOHSCROLL, S(16), S(38), S(420) - S(32), S(26), 101, WS_EX_CLIENTEDGE);
+    child(L"BUTTON", T(L"OK"), BS_DEFPUSHBUTTON | WS_TABSTOP, S(420) - S(16) - S(90), S(150) - S(16) - S(30), S(90), S(30), IDOK);
+    child(L"BUTTON", T(L"Cancel"), BS_PUSHBUTTON | WS_TABSTOP, S(420) - S(16) - S(90) - S(8) - S(90), S(150) - S(16) - S(30),
+          S(90), S(30), IDCANCEL);
+
+    RenameState st;
+    st.name = current;
+    SetWindowLongPtrW(wnd, GWLP_USERDATA, (LONG_PTR)&st);
+    EnableWindow(g_hwnd, FALSE);
+    ShowWindow(wnd, SW_SHOW);
+    SetForegroundWindow(wnd);
+    HWND edit = GetDlgItem(wnd, 101);
+    SetFocus(edit);
+    SendMessageW(edit, EM_SETSEL, 0, -1);
+
+    MSG msg;
+    while (!st.done && GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        if (!IsDialogMessageW(wnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    EnableWindow(g_hwnd, TRUE);
+    SetForegroundWindow(g_hwnd);
+    return st.ok ? st.name : current;
+}
+
 // Swaps a shown device with its neighbour (dir -1 = left, +1 = right) and remembers the new order.
 void MoveEntry(const std::wstring& key, int dir) {
     std::vector<TrayEntry*> list = OrderedEntries(true);
@@ -649,11 +832,15 @@ void ShowMenu() {
         AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sub, MF_STRING | (canLeft ? 0 : MF_GRAYED), base + DEV_LEFT, g_wantWidget ? T(L"Move left") : T(L"Move up"));
         AppendMenuW(sub, MF_STRING | (canRight ? 0 : MF_GRAYED), base + DEV_RIGHT, g_wantWidget ? T(L"Move right") : T(L"Move down"));
-        std::wstring line = e->st.name + L":  " + StatusText(*e) + L"   [" + T(e->st.via) + L"]";
+        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(sub, MF_STRING | (IsFavorite(k) ? MF_CHECKED : 0), base + DEV_FAVORITE, T(L"Favorite"));
+        AppendMenuW(sub, MF_STRING, base + DEV_RENAME, T(L"Rename..."));
+        std::wstring line = DisplayName(e->st) + L":  " + StatusText(*e) + L"   [" + T(e->st.via) + L"]";
         AppendMenuW(m, MF_POPUP | (IsHidden(k) ? 0 : MF_CHECKED), (UINT_PTR)sub, line.c_str());
         keys.push_back(k);
     }
     AppendMenuW(m, MF_STRING | (g_hideLastKnown ? MF_CHECKED : 0), ID_HIDE_LAST_KNOWN, T(L"Hide last known / asleep devices"));
+    AppendMenuW(m, MF_STRING | (g_onlyFavorites ? MF_CHECKED : 0), ID_ONLY_FAVORITES, T(L"Show only favorites"));
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING | (g_wantWidget ? MF_CHECKED : 0), ID_MODE_WIDGET, T(L"Show on the taskbar (icon + percentage)"));
     AppendMenuW(m, MF_STRING | (!g_wantWidget ? MF_CHECKED : 0), ID_MODE_TRAY, T(L"Show as tray icons"));
@@ -720,6 +907,7 @@ void ShowMenu() {
         case ID_REFRESH: SetEvent(g_refreshEvt); break;
         case ID_AUTOSTART: SetAutostart(!AutostartEnabled()); break;
         case ID_HIDE_LAST_KNOWN: SetHideLastKnown(!g_hideLastKnown); break;
+        case ID_ONLY_FAVORITES: SetOnlyFavorites(!g_onlyFavorites); break;
         case ID_WIDGET_BACKGROUND: SetWidgetBackground(!g_widgetBackground); break;
         case ID_MONITOR_ALL: SetWidgetMonitor(L"all"); break;
         case ID_LANG_AUTO: SetLanguage(L""); break;
@@ -744,6 +932,15 @@ void ShowMenu() {
                     case DEV_TOGGLE: ToggleHidden(key); break;
                     case DEV_LEFT:   MoveEntry(key, -1); break;
                     case DEV_RIGHT:  MoveEntry(key, +1); break;
+                    case DEV_FAVORITE: ToggleFavorite(key); break;
+                    case DEV_RENAME: {
+                        auto it = g_entries.find(key);
+                        if (it != g_entries.end()) {
+                            std::wstring name = AskDeviceName(DisplayName(it->second.st), it->second.st.name);
+                            SetDeviceName(key, it->second.st.name, name);
+                        }
+                        break;
+                    }
                 }
             }
     }
@@ -1005,6 +1202,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     g_widgetMonitor = LoadWidgetMonitor();
     widget::SetMonitorChoice(g_widgetMonitor);
     LoadHidden();
+    LoadNames();
+    LoadFavorites();
+    g_onlyFavorites = LoadBoolSetting(L"OnlyFavorites", false);
     LoadOrder();
     Reconcile();
     UpdatePlaceholder();  // something to click on until the first poll finishes

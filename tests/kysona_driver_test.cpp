@@ -1,4 +1,5 @@
 // VGN DragonFly F2 Ultra+ on the Kysona protocol: receiver 3554:FB49, USB cable 3554:FB3D.
+// Also VGN DragonFly 3 MasterGT (391D:1A1A), which speaks the same protocol.
 // Checks the cable label and that the dongle and the cable are shown as one device, which is
 // what used to produce "the same mouse twice" after plugging the charging cable in or out.
 #include "../src/drivers/drivers.h"
@@ -18,9 +19,9 @@ BYTE Checksum(const std::vector<BYTE>& b) {
     return (BYTE)(0x55 - sum);
 }
 
-HidColl Collection(USHORT pid) {
+HidColl Collection(USHORT pid, USHORT vid = 0x3554) {
     HidColl c;
-    c.vid = 0x3554;
+    c.vid = vid;
     c.pid = pid;
     c.caps.UsagePage = 0xFF02;
     c.caps.Usage = 0x0002;
@@ -76,7 +77,9 @@ int HidDev::Read(std::vector<BYTE>& out, int) {
     pending.erase(pending.begin());
     return (int)out.size();
 }
-std::wstring HidProduct(const HidColl&) { return L"VGN DragonFly F2 Ultra+"; }
+std::wstring HidProduct(const HidColl& c) {
+    return c.vid == 0x391D ? L"Dragonfly 3 MasterGT" : L"VGN DragonFly F2 Ultra+";
+}
 std::wstring Hex4(USHORT value) {
     wchar_t s[8];
     swprintf(s, 8, L"%04X", value);
@@ -116,6 +119,16 @@ int main() {
     int before = opens;
     PollKysona(ctx);
     assert(opens == before && ctx.out.size() == 1);
+
+    // VGN DragonFly 3 MasterGT: a 391D dongle on the same 17-byte protocol. The 391D vendor id is
+    // shared with Rongyuan receivers, so this also guards the vendor-list addition.
+    Answer(64, false);
+    ctx = Poll({ Collection(0x1A1A, 0x391D) });
+    assert(ctx.out.size() == 1);
+    assert(ctx.out[0].name == L"Dragonfly 3 MasterGT" && ctx.out[0].kind == DeviceKind::Mouse);
+    assert(ctx.out[0].via == L"2.4 GHz receiver");
+    assert(ctx.out[0].percent == 64 && !ctx.out[0].charging);
+    assert(ctx.out[0].key == L"kysona:391D:1A1A");
 
     puts("Kysona driver tests passed");
 }

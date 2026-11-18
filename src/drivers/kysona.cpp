@@ -1,9 +1,10 @@
 // Kysona, Pulsar and ATK / VXE wireless mice (VID 3554, ATK dongles 373B), G-Wolves models on this protocol
-// (VID 33E4, e.g. Fenrir Asym) and the original Hitscan
+// (VID 33E4, e.g. Fenrir Asym), the original Hitscan
 // Hyperlight (VID 3770, verified on the 1K receiver 3770:0200), Pulsar's newer XS-1 generation
-// (VID 3710, verified on the 8K Dongle 3710:5406) and Redragon's Compx-based mice (M916 Pro 1K,
+// (VID 3710, verified on the 8K Dongle 3710:5406), Redragon's Compx-based mice (M916 Pro 1K,
 // M913 tri-mode, G49: receiver 3554:F55D / F5D5, cable F55E; verified on an M916 Pro 1K through
-// the F55D receiver). They share one protocol:
+// the F55D receiver) and VGN's newer 391D receivers (DragonFly 3 MasterGT, 391D:1A1A, same 17-byte
+// collection FF02:0002 as the F2 Ultra+) share one protocol:
 // 17-byte output/input report id 08: [08][cmd][0 x14][checksum], checksum = 0x55 - sum(bytes 0..15).
 //   cmd 03 = online status -> reply [6] = 1 when the mouse is connected to the dongle
 //   cmd 04 = battery       -> reply [6] = percent, [7] = charging, [8..9] = millivolts
@@ -76,7 +77,7 @@ std::wstring CleanName(std::wstring n, USHORT vid, USHORT pid) {
 
 void PollKysona(PollContext& ctx) {
     std::vector<std::wstring> seenNames;
-    for (USHORT vendor : { (USHORT)0x3554, (USHORT)0x373B, (USHORT)0x3770, (USHORT)0x33E4, (USHORT)0x3710, (USHORT)0x35BB }) {
+    for (USHORT vendor : { (USHORT)0x3554, (USHORT)0x373B, (USHORT)0x3770, (USHORT)0x33E4, (USHORT)0x3710, (USHORT)0x35BB, (USHORT)0x391D }) {
         for (auto [vid, pid] : ctx.Products(vendor)) {
             // ATK N9 Pro / N9 Ultra headsets speak a serial protocol (atk_serial.cpp); never send
             // them mouse frames, even when the ATK app holds their port and they stay unclaimed.

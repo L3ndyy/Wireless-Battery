@@ -124,3 +124,11 @@ A new version is available: {version} (you have {current}). Update now? =
 The update could not be downloaded. Try again later. = 
 The update could not be installed. Try again later. = 
 The update is ready. Wireless Battery will restart. = 
+
+# Device menu: favorites and the user's own names
+Favorite = 
+Rename... = 
+Show only favorites = 
+Device name = 
+OK = 
+Cancel = 
